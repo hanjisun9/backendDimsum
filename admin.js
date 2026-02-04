@@ -1,8 +1,9 @@
-const express = require('express');
+import express from 'express';
+import bcrypt from 'bcryptjs';
+import pool from './db.js';
+import { body, validationResult } from 'express-validator';
+
 const router = express.Router();
-const bcrypt = require('bcryptjs');
-const pool = require('./db');
-const { body, validationResult } = require('express-validator');
 
 // Register admin
 router.post('/register', [
@@ -17,7 +18,6 @@ router.post('/register', [
   const { username, password } = req.body;
 
   try {
-    // Check if admin exists
     const existingAdmin = await pool.query(
       'SELECT * FROM admin WHERE username = $1',
       [username]
@@ -27,13 +27,11 @@ router.post('/register', [
       return res.status(400).json({ error: 'Admin already exists' });
     }
 
-    // Hash password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // Create admin
     const newAdmin = await pool.query(
-      'INSERT INTO admin (username, password) VALUES ($1, $2) RETURNING id, username',
+      'INSERT INTO admin (username, password) VALUES ($1, $2) RETURNING id, username, created_at',
       [username, hashedPassword]
     );
 
@@ -60,7 +58,6 @@ router.post('/login', [
   const { username, password } = req.body;
 
   try {
-    // Find admin
     const admin = await pool.query(
       'SELECT * FROM admin WHERE username = $1',
       [username]
@@ -70,14 +67,12 @@ router.post('/login', [
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    // Check password
     const isValidPassword = await bcrypt.compare(password, admin.rows[0].password);
 
     if (!isValidPassword) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    // Remove password from response
     const { password: _, ...adminData } = admin.rows[0];
 
     res.json({
@@ -90,7 +85,7 @@ router.post('/login', [
   }
 });
 
-// Get all admins (for testing)
+// Get all admins
 router.get('/', async (req, res) => {
   try {
     const admins = await pool.query(
@@ -103,4 +98,4 @@ router.get('/', async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

@@ -1,5 +1,8 @@
-const { Pool } = require('pg');
-require('dotenv').config();
+import pg from 'pg';
+import dotenv from 'dotenv';
+
+const { Pool } = pg;
+dotenv.config();
 
 const pool = new Pool({
   connectionString: process.env.NEON_DATABASE_URL,
@@ -8,19 +11,19 @@ const pool = new Pool({
   }
 });
 
-// Test database connection
-pool.connect((err, client, release) => {
-  if (err) {
-    return console.error('Error acquiring client', err.stack);
-  }
-  console.log('Connected to Neon PostgreSQL database');
-  release();
-});
+// Test connection
+try {
+  const client = await pool.connect();
+  console.log('✅ Connected to Neon PostgreSQL database');
+  client.release();
+} catch (err) {
+  console.error('❌ Database connection error:', err.stack);
+}
 
-// Create tables if they don't exist
+// Create tables
 const createTables = async () => {
   try {
-    // Create admin table
+    // Admin table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS admin (
         id SERIAL PRIMARY KEY,
@@ -30,7 +33,7 @@ const createTables = async () => {
       )
     `);
 
-    // Create products table
+    // Products table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS products (
         id SERIAL PRIMARY KEY,
@@ -43,12 +46,12 @@ const createTables = async () => {
       )
     `);
 
-    console.log('Tables created or already exist');
+    console.log('✅ Tables checked/created');
   } catch (error) {
-    console.error('Error creating tables:', error);
+    console.error('❌ Error creating tables:', error);
   }
 };
 
 createTables();
 
-module.exports = pool;
+export default pool;

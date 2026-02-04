@@ -1,7 +1,8 @@
-const express = require('express');
+import express from 'express';
+import pool from './db.js';
+import { body, validationResult } from 'express-validator';
+
 const router = express.Router();
-const pool = require('./db');
-const { body, validationResult } = require('express-validator');
 
 // Get all products
 router.get('/', async (req, res) => {
@@ -16,7 +17,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Get single product by ID
+// Get single product
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -36,7 +37,7 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// Create new product
+// Create product
 router.post('/', [
   body('nama_produk').notEmpty().withMessage('Product name is required'),
   body('harga').isDecimal().withMessage('Price must be a valid number'),
@@ -84,7 +85,6 @@ router.put('/:id', [
   const { nama_produk, harga, image_url, deskripsi } = req.body;
 
   try {
-    // Check if product exists
     const existingProduct = await pool.query(
       'SELECT * FROM products WHERE id = $1',
       [id]
@@ -94,7 +94,6 @@ router.put('/:id', [
       return res.status(404).json({ error: 'Product not found' });
     }
 
-    // Update product
     const updatedProduct = await pool.query(
       `UPDATE products 
        SET nama_produk = COALESCE($1, nama_produk),
@@ -128,7 +127,6 @@ router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Check if product exists
     const existingProduct = await pool.query(
       'SELECT * FROM products WHERE id = $1',
       [id]
@@ -138,7 +136,6 @@ router.delete('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Product not found' });
     }
 
-    // Delete product
     await pool.query('DELETE FROM products WHERE id = $1', [id]);
 
     res.json({ message: 'Product deleted successfully' });
@@ -148,7 +145,7 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
-// Search products by name
+// Search products
 router.get('/search/:keyword', async (req, res) => {
   try {
     const { keyword } = req.params;
@@ -166,4 +163,4 @@ router.get('/search/:keyword', async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;
