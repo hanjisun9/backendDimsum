@@ -1,101 +1,83 @@
+// admin.js - VERSION WITH DEBUGGING
 import express from 'express';
-import bcrypt from 'bcryptjs';
 import pool from './db.js';
-import { body, validationResult } from 'express-validator';
 
 const router = express.Router();
 
-// Register admin
-router.post('/register', [
-  body('username').notEmpty().withMessage('Username is required'),
-  body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters')
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({ errors: errors.array() });
-  }
-
-  const { username, password } = req.body;
-
-  try {
-    const existingAdmin = await pool.query(
-      'SELECT * FROM admin WHERE username = $1',
-      [username]
-    );
-
-    if (existingAdmin.rows.length > 0) {
-      return res.status(400).json({ error: 'Admin already exists' });
-    }
-
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
-
-    const newAdmin = await pool.query(
-      'INSERT INTO admin (username, password) VALUES ($1, $2) RETURNING id, username, created_at',
-      [username, hashedPassword]
-    );
-
-    res.status(201).json({
-      message: 'Admin created successfully',
-      admin: newAdmin.rows[0]
-    });
-  } catch (error) {
-    console.error('Error creating admin:', error);
-    res.status(500).json({ error: 'Server error' });
-  }
+// MIDDLEWARE: Log semua request ke admin routes
+router.use((req, res, next) => {
+  console.log(`[ADMIN] ${new Date().toISOString()} ${req.method} ${req.path}`);
+  next();
 });
 
-// Login admin
-router.post('/login', [
-  body('username').notEmpty().withMessage('Username is required'),
-  body('password').notEmpty().withMessage('Password is required')
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({ errors: errors.array() });
-  }
-
-  const { username, password } = req.body;
-
-  try {
-    const admin = await pool.query(
-      'SELECT * FROM admin WHERE username = $1',
-      [username]
-    );
-
-    if (admin.rows.length === 0) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
-    const isValidPassword = await bcrypt.compare(password, admin.rows[0].password);
-
-    if (!isValidPassword) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
-    const { password: _, ...adminData } = admin.rows[0];
-
-    res.json({
-      message: 'Login successful',
-      admin: adminData
-    });
-  } catch (error) {
-    console.error('Error logging in:', error);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
-// Get all admins
+// SIMPLE GET without bcrypt/validator
 router.get('/', async (req, res) => {
+  console.log('GET /api/admin - Handling request');
+  
   try {
+    console.log('Executing query...');
     const admins = await pool.query(
       'SELECT id, username, created_at FROM admin ORDER BY created_at DESC'
     );
-    res.json(admins.rows);
+    
+    console.log(`Query successful, found ${admins.rows.length} admins`);
+    res.json({
+      success: true,
+      count: admins.rows.length,
+      data: admins.rows
+    });
+    
   } catch (error) {
-    console.error('Error fetching admins:', error);
-    res.status(500).json({ error: 'Server error' });
+    console.error('❌ ERROR in GET /api/admin:', error);
+    console.error('Error stack:', error.stack);
+    
+    res.status(500).json({ 
+      success: false,
+      error: 'Server error',
+      message: error.message,
+      code: error.code,
+      detail: error.detail
+    });
   }
 });
 
+// SIMPLE LOGIN without bcrypt
+router.post('/login-simple', async (req, res) => {
+  console.log('POST /api/admin/login-simple', req.body);
+  
+  const { username, password } = req.body;
+  
+  if (!username || !password) {
+    return res.status(400).json({ 
+      error: 'Username and password required'
+    });
+  }
+  
+  try {
+    // Simple query tanpa bcrypt
+    const admin = await pool.query(
+      'SELECT id, username FROM admin WHERE username = $1 AND password = $2',
+      [username, password] // Warning: plain text password!
+    );
+    
+    if (admin.rows.length === 0) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    
+    res.json({
+      success: true,
+      message: 'Login successful (simple version)',
+      admin: admin.rows[0]
+    });
+    
+  } catch (error) {
+    console.error('Error in simple login:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Export (simpan routes dengan bcrypt/validator untuk nanti)
 export default router;
