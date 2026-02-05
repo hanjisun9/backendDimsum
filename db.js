@@ -1,7 +1,41 @@
-// di db.js, update createTables function
+import pg from 'pg';
+import dotenv from 'dotenv';
+
+const { Pool } = pg;
+dotenv.config();
+
+console.log('🔍 Initializing database connection...');
+console.log('NEON_DATABASE_URL set:', !!process.env.NEON_DATABASE_URL);
+
+// Create pool
+const pool = new Pool({
+  connectionString: process.env.NEON_DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false
+  }
+});
+
+// Test connection
+const testConnection = async () => {
+  try {
+    const client = await pool.connect();
+    console.log('✅ Connected to Neon PostgreSQL database');
+    
+    const result = await client.query('SELECT NOW()');
+    console.log('📅 Database time:', result.rows[0].now);
+    
+    client.release();
+    return true;
+  } catch (err) {
+    console.error('❌ Database connection error:', err.message);
+    return false;
+  }
+};
+
+// Create tables
 const createTables = async () => {
   try {
-    // Admin table dengan created_at
+    // Admin table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS admin (
         id SERIAL PRIMARY KEY,
@@ -10,9 +44,8 @@ const createTables = async () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
-    console.log('✅ Admin table checked/created');
 
-    // Products table dengan timestamps
+    // Products table  
     await pool.query(`
       CREATE TABLE IF NOT EXISTS products (
         id SERIAL PRIMARY KEY,
@@ -24,9 +57,42 @@ const createTables = async () => {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
-    console.log('✅ Products table checked/created');
 
+    console.log('✅ Tables checked/created');
   } catch (error) {
     console.error('❌ Error creating tables:', error.message);
   }
 };
+
+// Initialize database
+const initDatabase = async () => {
+  console.log('🔄 Initializing database...');
+  
+  const connected = await testConnection();
+  if (connected) {
+    await createTables();
+    
+    // Check if admin exists, if not create default
+    try {
+      const adminCheck = await pool.query('SELECT COUNT(*) FROM admin');
+      if (parseInt(adminCheck.rows[0].count) === 0) {
+        await pool.query(
+          'INSERT INTO admin (username, password) VALUES ($1, $2)',
+          ['admin', 'admin123'] // Plain password for now
+        );
+        console.log('👑 Default admin created: username=admin, password=admin123');
+      }
+    } catch (error) {
+      console.log('⚠️ Note: Could not check/create default admin');
+    }
+  } else {
+    console.log('🔄 Retrying database connection in 10 seconds...');
+    setTimeout(initDatabase, 10000);
+  }
+};
+
+// Start initialization
+initDatabase().catch(console.error);
+
+// Export pool
+export default pool;

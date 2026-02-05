@@ -1,20 +1,63 @@
-// index.js - FIXED VERSION
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 
-// Import pool untuk test
-import pool from './db.js';
+// Dynamic imports to handle any export issues
+let pool;
+let adminRoutes;
+let productRoutes;
 
-dotenv.config();
+(async () => {
+  dotenv.config();
+  
+  console.log('=== APP STARTING ===');
+  console.log('PORT:', process.env.PORT || 5000);
+  console.log('NODE_ENV:', process.env.NODE_ENV || 'development');
+  console.log('NEON_DATABASE_URL:', process.env.NEON_DATABASE_URL ? 'SET' : 'NOT SET');
+  
+  try {
+    // Import db
+    const dbModule = await import('./db.js');
+    pool = dbModule.default;
+    console.log('✅ Database module loaded');
+  } catch (error) {
+    console.error('❌ Failed to load database module:', error.message);
+    process.exit(1);
+  }
+  
+  try {
+    // Import admin routes
+    const adminModule = await import('./admin.js');
+    adminRoutes = adminModule.default;
+    console.log('✅ Admin routes loaded');
+  } catch (error) {
+    console.error('❌ Failed to load admin routes:', error.message);
+    // Create empty router as fallback
+    const express = await import('express');
+    adminRoutes = express.Router();
+    adminRoutes.get('/', (req, res) => {
+      res.json({ error: 'Admin routes failed to load', message: error.message });
+    });
+  }
+  
+  try {
+    // Import product routes
+    const productModule = await import('./products.js');
+    productRoutes = productModule.default;
+    console.log('✅ Product routes loaded');
+  } catch (error) {
+    console.error('❌ Failed to load product routes:', error.message);
+    // Create empty router as fallback
+    const express = await import('express');
+    productRoutes = express.Router();
+    productRoutes.get('/', (req, res) => {
+      res.json({ error: 'Product routes failed to load', message: error.message });
+    });
+  }
+})();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-
-console.log('=== APP STARTING ===');
-console.log('PORT:', PORT);
-console.log('NODE_ENV:', process.env.NODE_ENV || 'development');
-console.log('NEON_DATABASE_URL:', process.env.NEON_DATABASE_URL ? 'SET' : 'NOT SET');
 
 // Middleware
 app.use(cors());
@@ -27,48 +70,12 @@ app.use((req, res, next) => {
   next();
 });
 
-// Import routes dengan dynamic import untuk error handling
-let adminRoutes, productRoutes;
-
-(async () => {
-  try {
-    // Dynamic import untuk handle missing dependencies
-    const adminModule = await import('./admin.js');
-    adminRoutes = adminModule.default;
-    console.log('✅ Admin routes loaded');
-  } catch (error) {
-    console.error('❌ Failed to load admin routes:', error.message);
-    
-    // Fallback route
-    const express = await import('express');
-    adminRoutes = express.Router();
-    adminRoutes.get('/', (req, res) => {
-      res.json({ error: 'Admin routes failed to load', message: error.message });
-    });
-  }
-
-  try {
-    const productModule = await import('./products.js');
-    productRoutes = productModule.default;
-    console.log('✅ Product routes loaded');
-  } catch (error) {
-    console.error('❌ Failed to load product routes:', error.message);
-    
-    // Fallback route
-    const express = await import('express');
-    productRoutes = express.Router();
-    productRoutes.get('/', (req, res) => {
-      res.json({ error: 'Product routes failed to load', message: error.message });
-    });
-  }
-})();
-
-// Routes
+// Routes (use wrapper to handle async loading)
 app.use('/api/admin', (req, res, next) => {
   if (!adminRoutes) {
     return res.status(503).json({ 
       error: 'Admin routes not loaded yet',
-      message: 'Please wait for routes to initialize' 
+      message: 'Please wait for initialization' 
     });
   }
   adminRoutes(req, res, next);
@@ -78,7 +85,7 @@ app.use('/api/products', (req, res, next) => {
   if (!productRoutes) {
     return res.status(503).json({ 
       error: 'Product routes not loaded yet',
-      message: 'Please wait for routes to initialize' 
+      message: 'Please wait for initialization' 
     });
   }
   productRoutes(req, res, next);
@@ -87,15 +94,14 @@ app.use('/api/products', (req, res, next) => {
 // Debug endpoints
 app.get('/debug', async (req, res) => {
   try {
-    const dbResult = await pool.query('SELECT NOW() as time, version() as version');
+    const dbResult = await pool.query('SELECT NOW() as time');
     
     res.json({
       status: 'running',
       time: new Date().toISOString(),
       database: {
         connected: true,
-        time: dbResult.rows[0].time,
-        version: dbResult.rows[0].version
+        time: dbResult.rows[0].time
       },
       routes: {
         admin: adminRoutes ? 'loaded' : 'loading',
@@ -112,6 +118,69 @@ app.get('/debug', async (req, res) => {
       status: 'error',
       message: error.message,
       database: 'disconnected'
+    });
+  }
+});
+
+// Check table structure
+app.get('/debug/tables', async (req, res) => {
+  try {
+    const adminStructure = await pool.query(`
+      SELECT column_name, data_type
+      FROM information_schema.columns 
+      WHERE table_name = 'admin'
+      ORDER BY ordinal_position
+    `);
+    
+    const productsStructure = await pool.query(`
+      SELECT column_name, data_type
+      FROM information_schema.columns 
+      WHERE table_name = 'products'
+      ORDER BY ordinal_position
+    `);
+    
+    res.json({
+      admin: adminStructure.rows,
+      products: productsStructure.rows
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Fix missing columns
+app.post('/fix-tables', async (req, res) => {
+  try {
+    console.log('Fixing tables...');
+    
+    // Add created_at to admin if not exists
+    await pool.query(`
+      ALTER TABLE admin 
+      ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    `);
+    console.log('✅ Added created_at to admin table');
+    
+    // Add timestamps to products if not exists
+    await pool.query(`
+      ALTER TABLE products 
+      ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    `);
+    
+    await pool.query(`
+      ALTER TABLE products 
+      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    `);
+    console.log('✅ Added timestamps to products table');
+    
+    res.json({
+      success: true,
+      message: 'Tables fixed successfully'
+    });
+  } catch (error) {
+    console.error('Error fixing tables:', error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message
     });
   }
 });
@@ -144,32 +213,21 @@ app.get('/', (req, res) => {
       admin: '/api/admin',
       products: '/api/products',
       health: '/health',
-      debug: '/debug'
+      debug: '/debug',
+      'debug-tables': '/debug/tables',
+      'fix-tables': '/fix-tables (POST)'
     },
-    note: 'If endpoints return error, check if bcryptjs and express-validator are installed'
+    note: 'If tables missing columns, POST to /fix-tables first'
   });
 });
 
 // Error handling
 app.use((err, req, res, next) => {
-  console.error('🔥 Server Error:', err);
-  
-  // Check if it's a missing module error
-  let errorMessage = 'Server error';
-  let errorDetails = err.message;
-  
-  if (err.message.includes('bcryptjs')) {
-    errorMessage = 'Dependency missing: bcryptjs';
-    errorDetails = 'Run: npm install bcryptjs express-validator';
-  } else if (err.message.includes('express-validator')) {
-    errorMessage = 'Dependency missing: express-validator';
-    errorDetails = 'Run: npm install bcryptjs express-validator';
-  }
-  
+  console.error('🔥 Server Error:', err.message);
   res.status(500).json({ 
-    error: errorMessage,
-    message: errorDetails,
-    fix: 'Install missing dependencies: npm install bcryptjs express-validator'
+    error: 'Server error',
+    message: err.message,
+    fix: 'Check if database tables have correct columns'
   });
 });
 
@@ -177,71 +235,15 @@ app.use((err, req, res, next) => {
 app.use('*', (req, res) => {
   res.status(404).json({ 
     error: 'Endpoint not found',
-    available: ['/', '/health', '/debug', '/api/products', '/api/admin']
+    available: [
+      '/', 
+      '/health', 
+      '/debug', 
+      '/debug/tables',
+      '/api/products', 
+      '/api/admin'
+    ]
   });
-});
-
-// di index.js tambahkan
-app.get('/debug/table-structure', async (req, res) => {
-  try {
-    const adminStructure = await pool.query(`
-      SELECT column_name, data_type, is_nullable
-      FROM information_schema.columns 
-      WHERE table_name = 'admin'
-      ORDER BY ordinal_position
-    `);
-    
-    const productsStructure = await pool.query(`
-      SELECT column_name, data_type, is_nullable
-      FROM information_schema.columns 
-      WHERE table_name = 'products'
-      ORDER BY ordinal_position
-    `);
-    
-    res.json({
-      admin: adminStructure.rows,
-      products: productsStructure.rows
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// di index.js tambahkan endpoint untuk fix tables
-app.post('/fix-tables', async (req, res) => {
-  try {
-    console.log('Fixing tables...');
-    
-    // Add created_at to admin if not exists
-    await pool.query(`
-      ALTER TABLE admin 
-      ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    `);
-    console.log('✅ Added created_at to admin table');
-    
-    // Add created_at and updated_at to products if not exists
-    await pool.query(`
-      ALTER TABLE products 
-      ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    `);
-    
-    await pool.query(`
-      ALTER TABLE products 
-      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    `);
-    console.log('✅ Added timestamps to products table');
-    
-    res.json({
-      success: true,
-      message: 'Tables fixed successfully'
-    });
-  } catch (error) {
-    console.error('Error fixing tables:', error);
-    res.status(500).json({ 
-      success: false,
-      error: error.message
-    });
-  }
 });
 
 app.listen(PORT, () => {
@@ -251,6 +253,8 @@ app.listen(PORT, () => {
   console.log('GET  /              - Welcome');
   console.log('GET  /health        - Health check');
   console.log('GET  /debug         - Debug info');
+  console.log('GET  /debug/tables  - Check table structure');
+  console.log('POST /fix-tables    - Fix missing columns');
   console.log('GET  /api/products  - Products API');
   console.log('GET  /api/admin     - Admin API');
 });

@@ -1,52 +1,102 @@
-// products.js - PERBAIKI query
 import express from 'express';
-import pool from './db.js';
+
+// Dynamic import for pool
+let pool;
+
+(async () => {
+  try {
+    const dbModule = await import('./db.js');
+    pool = dbModule.default;
+  } catch (error) {
+    console.error('Failed to import pool in products.js:', error);
+  }
+})();
 
 const router = express.Router();
 
-// GET all products - tanpa created_at
+// Simple GET products - works with or without timestamps
 router.get('/', async (req, res) => {
   console.log('GET /api/products');
   
+  if (!pool) {
+    return res.status(500).json({ error: 'Database not connected' });
+  }
+  
   try {
+    // First try with all columns
     const products = await pool.query(
-      'SELECT id, nama_produk, harga, image_url, deskripsi FROM products ORDER BY id DESC'
+      'SELECT id, nama_produk, harga, image_url, deskripsi, created_at, updated_at FROM products ORDER BY id DESC'
     );
     
-    console.log(`Found ${products.rows.length} products`);
     res.json({
       success: true,
       count: products.rows.length,
       data: products.rows
     });
   } catch (error) {
-    console.error('Error:', error);
+    // If error, try without timestamps
+    console.log('Retrying query without timestamps...');
     
-    // Debug columns
     try {
-      const columns = await pool.query(`
-        SELECT column_name 
-        FROM information_schema.columns 
-        WHERE table_name = 'products'
-      `);
+      const products = await pool.query(
+        'SELECT id, nama_produk, harga, image_url, deskripsi FROM products ORDER BY id DESC'
+      );
       
-      res.status(500).json({ 
-        error: 'Query failed',
-        message: error.message,
-        available_columns: columns.rows.map(c => c.column_name)
+      res.json({
+        success: true,
+        count: products.rows.length,
+        data: products.rows,
+        note: 'timestamp columns might be missing'
       });
-    } catch (colError) {
+    } catch (retryError) {
+      console.error('Error fetching products:', retryError);
       res.status(500).json({ 
         error: 'Server error',
-        message: error.message
+        message: retryError.message
       });
     }
   }
 });
 
-// CREATE product - tanpa created_at/updated_at
+// GET single product
+router.get('/:id', async (req, res) => {
+  const { id } = req.params;
+  console.log(`GET /api/products/${id}`);
+  
+  if (!pool) {
+    return res.status(500).json({ error: 'Database not connected' });
+  }
+  
+  try {
+    const product = await pool.query(
+      'SELECT id, nama_produk, harga, image_url, deskripsi FROM products WHERE id = $1',
+      [id]
+    );
+    
+    if (product.rows.length === 0) {
+      return res.status(404).json({ error: 'Product not found' });
+    }
+    
+    res.json({
+      success: true,
+      product: product.rows[0]
+    });
+  } catch (error) {
+    console.error('Error:', error);
+    res.status(500).json({ 
+      error: 'Server error',
+      message: error.message
+    });
+  }
+});
+
+// CREATE product
 router.post('/', async (req, res) => {
   console.log('POST /api/products', req.body);
+  
+  if (!pool) {
+    return res.status(500).json({ error: 'Database not connected' });
+  }
   
   const { nama_produk, harga, image_url, deskripsi } = req.body;
   
@@ -78,39 +128,15 @@ router.post('/', async (req, res) => {
   }
 });
 
-// GET single product
-router.get('/:id', async (req, res) => {
-  const { id } = req.params;
-  console.log(`GET /api/products/${id}`);
-  
-  try {
-    const product = await pool.query(
-      'SELECT id, nama_produk, harga, image_url, deskripsi FROM products WHERE id = $1',
-      [id]
-    );
-    
-    if (product.rows.length === 0) {
-      return res.status(404).json({ error: 'Product not found' });
-    }
-    
-    res.json({
-      success: true,
-      product: product.rows[0]
-    });
-  } catch (error) {
-    console.error('Error:', error);
-    res.status(500).json({ 
-      error: 'Server error',
-      message: error.message
-    });
-  }
-});
-
-// UPDATE product - tanpa updated_at
+// UPDATE product
 router.put('/:id', async (req, res) => {
   const { id } = req.params;
   const updates = req.body;
   console.log(`PUT /api/products/${id}`, updates);
+  
+  if (!pool) {
+    return res.status(500).json({ error: 'Database not connected' });
+  }
   
   try {
     // Get existing product
@@ -158,6 +184,10 @@ router.delete('/:id', async (req, res) => {
   const { id } = req.params;
   console.log(`DELETE /api/products/${id}`);
   
+  if (!pool) {
+    return res.status(500).json({ error: 'Database not connected' });
+  }
+  
   try {
     const result = await pool.query(
       'DELETE FROM products WHERE id = $1 RETURNING id',
@@ -180,6 +210,21 @@ router.delete('/:id', async (req, res) => {
       message: error.message
     });
   }
+});
+
+// Test endpoint
+router.get('/test', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Products API is working',
+    endpoints: {
+      'GET /': 'Get all products',
+      'GET /:id': 'Get single product',
+      'POST /': 'Create product',
+      'PUT /:id': 'Update product',
+      'DELETE /:id': 'Delete product'
+    }
+  });
 });
 
 export default router;
