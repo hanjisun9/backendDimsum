@@ -4,6 +4,14 @@ import dotenv from 'dotenv';
 const { Pool } = pg;
 dotenv.config();
 
+console.log('🔍 Checking for NEON_DATABASE_URL...');
+console.log('NEON_DATABASE_URL is set:', !!process.env.NEON_DATABASE_URL);
+
+if (!process.env.NEON_DATABASE_URL) {
+  console.error('❌ NEON_DATABASE_URL is not set in environment variables!');
+  console.error('Please set it in Koyeb dashboard -> Variables');
+}
+
 const pool = new Pool({
   connectionString: process.env.NEON_DATABASE_URL,
   ssl: {
@@ -11,14 +19,33 @@ const pool = new Pool({
   }
 });
 
-// Test connection
-try {
-  const client = await pool.connect();
-  console.log('✅ Connected to Neon PostgreSQL database');
-  client.release();
-} catch (err) {
-  console.error('❌ Database connection error:', err.stack);
-}
+// Test connection dengan lebih banyak detail
+const testConnection = async () => {
+  try {
+    const client = await pool.connect();
+    console.log('✅ Connected to Neon PostgreSQL database');
+    
+    // Test query
+    const result = await client.query('SELECT NOW()');
+    console.log('📅 Database time:', result.rows[0].now);
+    
+    // Check if we can query
+    const version = await client.query('SELECT version()');
+    console.log('🔧 PostgreSQL version:', version.rows[0].version.split(',')[0]);
+    
+    client.release();
+    return true;
+  } catch (err) {
+    console.error('❌ Database connection error:', err.message);
+    console.error('Full error:', err);
+    console.log('📝 Connection string (partial):', 
+      process.env.NEON_DATABASE_URL 
+        ? process.env.NEON_DATABASE_URL.substring(0, 50) + '...'
+        : 'Not set'
+    );
+    return false;
+  }
+};
 
 // Create tables
 const createTables = async () => {
@@ -48,10 +75,22 @@ const createTables = async () => {
 
     console.log('✅ Tables checked/created');
   } catch (error) {
-    console.error('❌ Error creating tables:', error);
+    console.error('❌ Error creating tables:', error.message);
   }
 };
 
-createTables();
+// Initialize database
+const initDb = async () => {
+  const connected = await testConnection();
+  if (connected) {
+    await createTables();
+  } else {
+    console.log('🔄 Retrying connection in 5 seconds...');
+    setTimeout(initDb, 5000);
+  }
+};
+
+// Start initialization
+initDb();
 
 export default pool;
