@@ -1,16 +1,12 @@
+// db.js - FIXED VERSION
 import pg from 'pg';
 import dotenv from 'dotenv';
 
 const { Pool } = pg;
 dotenv.config();
 
-console.log('🔍 Checking for NEON_DATABASE_URL...');
-console.log('NEON_DATABASE_URL is set:', !!process.env.NEON_DATABASE_URL);
-
-if (!process.env.NEON_DATABASE_URL) {
-  console.error('❌ NEON_DATABASE_URL is not set in environment variables!');
-  console.error('Please set it in Koyeb dashboard -> Variables');
-}
+console.log('🔍 Initializing database connection...');
+console.log('NEON_DATABASE_URL set:', !!process.env.NEON_DATABASE_URL);
 
 const pool = new Pool({
   connectionString: process.env.NEON_DATABASE_URL,
@@ -19,7 +15,7 @@ const pool = new Pool({
   }
 });
 
-// Test connection dengan lebih banyak detail
+// Function untuk test connection
 const testConnection = async () => {
   try {
     const client = await pool.connect();
@@ -29,25 +25,15 @@ const testConnection = async () => {
     const result = await client.query('SELECT NOW()');
     console.log('📅 Database time:', result.rows[0].now);
     
-    // Check if we can query
-    const version = await client.query('SELECT version()');
-    console.log('🔧 PostgreSQL version:', version.rows[0].version.split(',')[0]);
-    
     client.release();
     return true;
   } catch (err) {
     console.error('❌ Database connection error:', err.message);
-    console.error('Full error:', err);
-    console.log('📝 Connection string (partial):', 
-      process.env.NEON_DATABASE_URL 
-        ? process.env.NEON_DATABASE_URL.substring(0, 50) + '...'
-        : 'Not set'
-    );
     return false;
   }
 };
 
-// Create tables
+// Function untuk create tables
 const createTables = async () => {
   try {
     // Admin table
@@ -79,18 +65,38 @@ const createTables = async () => {
   }
 };
 
-// Initialize database
-const initDb = async () => {
+// Initialize database async
+const initDatabase = async () => {
+  console.log('🔄 Initializing database...');
+  
   const connected = await testConnection();
   if (connected) {
     await createTables();
+    
+    // Create default admin jika belum ada
+    try {
+      const adminCheck = await pool.query('SELECT COUNT(*) FROM admin');
+      if (parseInt(adminCheck.rows[0].count) === 0) {
+        // Create default admin (password: admin123)
+        const bcrypt = await import('bcryptjs');
+        const hashedPassword = await bcrypt.default.hash('admin123', 10);
+        
+        await pool.query(
+          'INSERT INTO admin (username, password) VALUES ($1, $2)',
+          ['admin', hashedPassword]
+        );
+        console.log('👑 Default admin created: username=admin, password=admin123');
+      }
+    } catch (error) {
+      console.log('⚠️ Could not check/create default admin:', error.message);
+    }
   } else {
-    console.log('🔄 Retrying connection in 5 seconds...');
-    setTimeout(initDb, 5000);
+    console.log('🔄 Retrying database connection in 10 seconds...');
+    setTimeout(initDatabase, 10000);
   }
 };
 
-// Start initialization
-initDb();
+// Start initialization (tapi jangan block main thread)
+initDatabase().catch(console.error);
 
 export default pool;
