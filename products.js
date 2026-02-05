@@ -1,29 +1,13 @@
 import express from 'express';
-
-// Dynamic import for pool
-let pool;
-
-(async () => {
-  try {
-    const dbModule = await import('./db.js');
-    pool = dbModule.default;
-  } catch (error) {
-    console.error('Failed to import pool in products.js:', error);
-  }
-})();
+import pool from './db.js';
 
 const router = express.Router();
 
-// Simple GET products - works with or without timestamps
+// GET all products
 router.get('/', async (req, res) => {
   console.log('GET /api/products');
   
-  if (!pool) {
-    return res.status(500).json({ error: 'Database not connected' });
-  }
-  
   try {
-    // First try with all columns
     const products = await pool.query(
       'SELECT id, nama_produk, harga, image_url, deskripsi, created_at, updated_at FROM products ORDER BY id DESC'
     );
@@ -34,9 +18,9 @@ router.get('/', async (req, res) => {
       data: products.rows
     });
   } catch (error) {
-    // If error, try without timestamps
-    console.log('Retrying query without timestamps...');
+    console.error('Error fetching products:', error.message);
     
+    // Fallback tanpa timestamp
     try {
       const products = await pool.query(
         'SELECT id, nama_produk, harga, image_url, deskripsi FROM products ORDER BY id DESC'
@@ -46,13 +30,15 @@ router.get('/', async (req, res) => {
         success: true,
         count: products.rows.length,
         data: products.rows,
-        note: 'timestamp columns might be missing'
+        note: 'Fetched without timestamps'
       });
     } catch (retryError) {
-      console.error('Error fetching products:', retryError);
       res.status(500).json({ 
+        success: false,
         error: 'Server error',
-        message: retryError.message
+        message: retryError.message,
+        code: retryError.code,
+        hint: 'Check if products table exists and has correct columns'
       });
     }
   }
@@ -61,11 +47,16 @@ router.get('/', async (req, res) => {
 // GET single product
 router.get('/:id', async (req, res) => {
   const { id } = req.params;
-  console.log(`GET /api/products/${id}`);
   
-  if (!pool) {
-    return res.status(500).json({ error: 'Database not connected' });
+  // Pastikan id bukan 'test'
+  if (id === 'test') {
+    return res.json({
+      success: true,
+      message: 'Products API is working'
+    });
   }
+  
+  console.log(`GET /api/products/${id}`);
   
   try {
     const product = await pool.query(
@@ -74,7 +65,10 @@ router.get('/:id', async (req, res) => {
     );
     
     if (product.rows.length === 0) {
-      return res.status(404).json({ error: 'Product not found' });
+      return res.status(404).json({ 
+        success: false,
+        error: 'Product not found' 
+      });
     }
     
     res.json({
@@ -84,6 +78,7 @@ router.get('/:id', async (req, res) => {
   } catch (error) {
     console.error('Error:', error);
     res.status(500).json({ 
+      success: false,
       error: 'Server error',
       message: error.message
     });
@@ -94,14 +89,13 @@ router.get('/:id', async (req, res) => {
 router.post('/', async (req, res) => {
   console.log('POST /api/products', req.body);
   
-  if (!pool) {
-    return res.status(500).json({ error: 'Database not connected' });
-  }
-  
   const { nama_produk, harga, image_url, deskripsi } = req.body;
   
-  if (!nama_produk || !harga) {
-    return res.status(400).json({ error: 'nama_produk and harga are required' });
+  if (!nama_produk || harga === undefined) {
+    return res.status(400).json({ 
+      success: false,
+      error: 'nama_produk and harga are required' 
+    });
   }
   
   try {
@@ -122,6 +116,7 @@ router.post('/', async (req, res) => {
   } catch (error) {
     console.error('Error:', error);
     res.status(500).json({ 
+      success: false,
       error: 'Failed to create product',
       message: error.message
     });
@@ -134,10 +129,6 @@ router.put('/:id', async (req, res) => {
   const updates = req.body;
   console.log(`PUT /api/products/${id}`, updates);
   
-  if (!pool) {
-    return res.status(500).json({ error: 'Database not connected' });
-  }
-  
   try {
     // Get existing product
     const existing = await pool.query(
@@ -146,13 +137,16 @@ router.put('/:id', async (req, res) => {
     );
     
     if (existing.rows.length === 0) {
-      return res.status(404).json({ error: 'Product not found' });
+      return res.status(404).json({ 
+        success: false,
+        error: 'Product not found' 
+      });
     }
     
     // Merge updates
     const merged = {
       nama_produk: updates.nama_produk || existing.rows[0].nama_produk,
-      harga: updates.harga || existing.rows[0].harga,
+      harga: updates.harga !== undefined ? updates.harga : existing.rows[0].harga,
       image_url: updates.image_url !== undefined ? updates.image_url : existing.rows[0].image_url,
       deskripsi: updates.deskripsi !== undefined ? updates.deskripsi : existing.rows[0].deskripsi
     };
@@ -173,6 +167,7 @@ router.put('/:id', async (req, res) => {
   } catch (error) {
     console.error('Error:', error);
     res.status(500).json({ 
+      success: false,
       error: 'Failed to update product',
       message: error.message
     });
@@ -184,10 +179,6 @@ router.delete('/:id', async (req, res) => {
   const { id } = req.params;
   console.log(`DELETE /api/products/${id}`);
   
-  if (!pool) {
-    return res.status(500).json({ error: 'Database not connected' });
-  }
-  
   try {
     const result = await pool.query(
       'DELETE FROM products WHERE id = $1 RETURNING id',
@@ -195,7 +186,10 @@ router.delete('/:id', async (req, res) => {
     );
     
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Product not found' });
+      return res.status(404).json({ 
+        success: false,
+        error: 'Product not found' 
+      });
     }
     
     res.json({
@@ -206,25 +200,11 @@ router.delete('/:id', async (req, res) => {
   } catch (error) {
     console.error('Error:', error);
     res.status(500).json({ 
+      success: false,
       error: 'Failed to delete product',
       message: error.message
     });
   }
-});
-
-// Test endpoint
-router.get('/test', (req, res) => {
-  res.json({
-    success: true,
-    message: 'Products API is working',
-    endpoints: {
-      'GET /': 'Get all products',
-      'GET /:id': 'Get single product',
-      'POST /': 'Create product',
-      'PUT /:id': 'Update product',
-      'DELETE /:id': 'Delete product'
-    }
-  });
 });
 
 export default router;

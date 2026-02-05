@@ -2,59 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 
-// Dynamic imports to handle any export issues
-let pool;
-let adminRoutes;
-let productRoutes;
-
-(async () => {
-  dotenv.config();
-  
-  console.log('=== APP STARTING ===');
-  console.log('PORT:', process.env.PORT || 5000);
-  console.log('NODE_ENV:', process.env.NODE_ENV || 'development');
-  console.log('NEON_DATABASE_URL:', process.env.NEON_DATABASE_URL ? 'SET' : 'NOT SET');
-  
-  try {
-    // Import db
-    const dbModule = await import('./db.js');
-    pool = dbModule.default;
-    console.log('✅ Database module loaded');
-  } catch (error) {
-    console.error('❌ Failed to load database module:', error.message);
-    process.exit(1);
-  }
-  
-  try {
-    // Import admin routes
-    const adminModule = await import('./admin.js');
-    adminRoutes = adminModule.default;
-    console.log('✅ Admin routes loaded');
-  } catch (error) {
-    console.error('❌ Failed to load admin routes:', error.message);
-    // Create empty router as fallback
-    const express = await import('express');
-    adminRoutes = express.Router();
-    adminRoutes.get('/', (req, res) => {
-      res.json({ error: 'Admin routes failed to load', message: error.message });
-    });
-  }
-  
-  try {
-    // Import product routes
-    const productModule = await import('./products.js');
-    productRoutes = productModule.default;
-    console.log('✅ Product routes loaded');
-  } catch (error) {
-    console.error('❌ Failed to load product routes:', error.message);
-    // Create empty router as fallback
-    const express = await import('express');
-    productRoutes = express.Router();
-    productRoutes.get('/', (req, res) => {
-      res.json({ error: 'Product routes failed to load', message: error.message });
-    });
-  }
-})();
+dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -70,34 +18,106 @@ app.use((req, res, next) => {
   next();
 });
 
-// Routes (use wrapper to handle async loading)
-app.use('/api/admin', (req, res, next) => {
-  if (!adminRoutes) {
-    return res.status(503).json({ 
-      error: 'Admin routes not loaded yet',
-      message: 'Please wait for initialization' 
+// Variables untuk routes
+let pool = null;
+let adminRoutes = null;
+let productRoutes = null;
+let isReady = false;
+
+// Initialize function
+const initialize = async () => {
+  console.log('=== APP STARTING ===');
+  console.log('PORT:', PORT);
+  console.log('NODE_ENV:', process.env.NODE_ENV || 'development');
+  console.log('NEON_DATABASE_URL:', process.env.NEON_DATABASE_URL ? 'SET' : 'NOT SET');
+  
+  try {
+    // Import dan init database
+    const dbModule = await import('./db.js');
+    pool = dbModule.default;
+    
+    // Jalankan initDatabase untuk fix columns
+    if (dbModule.initDatabase) {
+      await dbModule.initDatabase();
+    }
+    console.log('✅ Database module loaded and initialized');
+  } catch (error) {
+    console.error('❌ Failed to load database module:', error.message);
+    throw error;
+  }
+  
+  try {
+    // Import admin routes
+    const adminModule = await import('./admin.js');
+    adminRoutes = adminModule.default;
+    console.log('✅ Admin routes loaded');
+  } catch (error) {
+    console.error('❌ Failed to load admin routes:', error.message);
+    adminRoutes = express.Router();
+    adminRoutes.all('*', (req, res) => {
+      res.status(500).json({ error: 'Admin routes failed to load', message: error.message });
     });
+  }
+  
+  try {
+    // Import product routes
+    const productModule = await import('./products.js');
+    productRoutes = productModule.default;
+    console.log('✅ Product routes loaded');
+  } catch (error) {
+    console.error('❌ Failed to load product routes:', error.message);
+    productRoutes = express.Router();
+    productRoutes.all('*', (req, res) => {
+      res.status(500).json({ error: 'Product routes failed to load', message: error.message });
+    });
+  }
+  
+  isReady = true;
+  console.log('✅ All modules loaded successfully');
+};
+
+// Middleware untuk cek readiness
+const checkReady = (req, res, next) => {
+  if (!isReady) {
+    return res.status(503).json({ 
+      error: 'Service not ready',
+      message: 'Server is still initializing, please wait...'
+    });
+  }
+  next();
+};
+
+// Routes dengan checkReady middleware
+app.use('/api/admin', checkReady, (req, res, next) => {
+  if (!adminRoutes) {
+    return res.status(503).json({ error: 'Admin routes not loaded' });
   }
   adminRoutes(req, res, next);
 });
 
-app.use('/api/products', (req, res, next) => {
+app.use('/api/products', checkReady, (req, res, next) => {
   if (!productRoutes) {
-    return res.status(503).json({ 
-      error: 'Product routes not loaded yet',
-      message: 'Please wait for initialization' 
-    });
+    return res.status(503).json({ error: 'Product routes not loaded' });
   }
   productRoutes(req, res, next);
 });
 
-// Debug endpoints
+// Debug endpoint
 app.get('/debug', async (req, res) => {
+  if (!pool) {
+    return res.json({
+      status: 'initializing',
+      isReady,
+      database: 'not connected'
+    });
+  }
+  
   try {
     const dbResult = await pool.query('SELECT NOW() as time');
     
     res.json({
       status: 'running',
+      isReady,
       time: new Date().toISOString(),
       database: {
         connected: true,
@@ -106,24 +126,22 @@ app.get('/debug', async (req, res) => {
       routes: {
         admin: adminRoutes ? 'loaded' : 'loading',
         products: productRoutes ? 'loaded' : 'loading'
-      },
-      env: {
-        node_env: process.env.NODE_ENV,
-        port: PORT,
-        neon_url_set: !!process.env.NEON_DATABASE_URL
       }
     });
   } catch (error) {
     res.status(500).json({
       status: 'error',
-      message: error.message,
-      database: 'disconnected'
+      message: error.message
     });
   }
 });
 
 // Check table structure
 app.get('/debug/tables', async (req, res) => {
+  if (!pool) {
+    return res.status(503).json({ error: 'Database not ready' });
+  }
+  
   try {
     const adminStructure = await pool.query(`
       SELECT column_name, data_type
@@ -148,76 +166,42 @@ app.get('/debug/tables', async (req, res) => {
   }
 });
 
-// Fix missing columns
-app.post('/fix-tables', async (req, res) => {
-  try {
-    console.log('Fixing tables...');
-    
-    // Add created_at to admin if not exists
-    await pool.query(`
-      ALTER TABLE admin 
-      ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    `);
-    console.log('✅ Added created_at to admin table');
-    
-    // Add timestamps to products if not exists
-    await pool.query(`
-      ALTER TABLE products 
-      ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    `);
-    
-    await pool.query(`
-      ALTER TABLE products 
-      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    `);
-    console.log('✅ Added timestamps to products table');
-    
-    res.json({
-      success: true,
-      message: 'Tables fixed successfully'
-    });
-  } catch (error) {
-    console.error('Error fixing tables:', error);
-    res.status(500).json({ 
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// Health check
+// Health check (selalu jalan)
 app.get('/health', async (req, res) => {
-  try {
-    await pool.query('SELECT 1');
-    res.json({ 
-      status: 'OK', 
-      message: 'Server is running',
-      timestamp: new Date().toISOString(),
-      database: 'connected'
-    });
-  } catch (error) {
-    res.status(500).json({ 
-      status: 'ERROR', 
-      message: 'Server error',
-      error: error.message,
-      database: 'disconnected'
-    });
+  const response = { 
+    status: isReady ? 'OK' : 'INITIALIZING',
+    message: 'Server is running',
+    timestamp: new Date().toISOString(),
+    ready: isReady
+  };
+  
+  if (pool) {
+    try {
+      await pool.query('SELECT 1');
+      response.database = 'connected';
+    } catch (error) {
+      response.database = 'disconnected';
+      response.dbError = error.message;
+    }
+  } else {
+    response.database = 'not initialized';
   }
+  
+  res.json(response);
 });
 
 // Root endpoint
 app.get('/', (req, res) => {
   res.json({ 
     message: 'Welcome to Dimsum Backend API',
+    ready: isReady,
     endpoints: {
       admin: '/api/admin',
       products: '/api/products',
       health: '/health',
       debug: '/debug',
-      'debug-tables': '/debug/tables',
-      'fix-tables': '/fix-tables (POST)'
-    },
-    note: 'If tables missing columns, POST to /fix-tables first'
+      'debug-tables': '/debug/tables'
+    }
   });
 });
 
@@ -226,8 +210,7 @@ app.use((err, req, res, next) => {
   console.error('🔥 Server Error:', err.message);
   res.status(500).json({ 
     error: 'Server error',
-    message: err.message,
-    fix: 'Check if database tables have correct columns'
+    message: err.message
   });
 });
 
@@ -235,26 +218,28 @@ app.use((err, req, res, next) => {
 app.use('*', (req, res) => {
   res.status(404).json({ 
     error: 'Endpoint not found',
-    available: [
-      '/', 
-      '/health', 
-      '/debug', 
-      '/debug/tables',
-      '/api/products', 
-      '/api/admin'
-    ]
+    available: ['/', '/health', '/debug', '/api/products', '/api/admin']
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📡 http://localhost:${PORT}`);
-  console.log('=== ENDPOINTS ===');
-  console.log('GET  /              - Welcome');
-  console.log('GET  /health        - Health check');
-  console.log('GET  /debug         - Debug info');
-  console.log('GET  /debug/tables  - Check table structure');
-  console.log('POST /fix-tables    - Fix missing columns');
-  console.log('GET  /api/products  - Products API');
-  console.log('GET  /api/admin     - Admin API');
-});
+// Start server SETELAH initialize
+const startServer = async () => {
+  try {
+    await initialize();
+    
+    app.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`📡 http://localhost:${PORT}`);
+      console.log('=== READY TO SERVE ===');
+    });
+  } catch (error) {
+    console.error('❌ Failed to start server:', error.message);
+    
+    // Start server anyway untuk debugging
+    app.listen(PORT, () => {
+      console.log(`⚠️ Server running on port ${PORT} (with errors)`);
+    });
+  }
+};
+
+startServer();  
