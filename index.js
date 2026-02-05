@@ -181,6 +181,69 @@ app.use('*', (req, res) => {
   });
 });
 
+// di index.js tambahkan
+app.get('/debug/table-structure', async (req, res) => {
+  try {
+    const adminStructure = await pool.query(`
+      SELECT column_name, data_type, is_nullable
+      FROM information_schema.columns 
+      WHERE table_name = 'admin'
+      ORDER BY ordinal_position
+    `);
+    
+    const productsStructure = await pool.query(`
+      SELECT column_name, data_type, is_nullable
+      FROM information_schema.columns 
+      WHERE table_name = 'products'
+      ORDER BY ordinal_position
+    `);
+    
+    res.json({
+      admin: adminStructure.rows,
+      products: productsStructure.rows
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// di index.js tambahkan endpoint untuk fix tables
+app.post('/fix-tables', async (req, res) => {
+  try {
+    console.log('Fixing tables...');
+    
+    // Add created_at to admin if not exists
+    await pool.query(`
+      ALTER TABLE admin 
+      ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    `);
+    console.log('✅ Added created_at to admin table');
+    
+    // Add created_at and updated_at to products if not exists
+    await pool.query(`
+      ALTER TABLE products 
+      ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    `);
+    
+    await pool.query(`
+      ALTER TABLE products 
+      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    `);
+    console.log('✅ Added timestamps to products table');
+    
+    res.json({
+      success: true,
+      message: 'Tables fixed successfully'
+    });
+  } catch (error) {
+    console.error('Error fixing tables:', error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📡 http://localhost:${PORT}`);
