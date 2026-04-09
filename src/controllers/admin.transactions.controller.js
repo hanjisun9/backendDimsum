@@ -95,3 +95,48 @@ exports.receipt = async (req, res) => {
   doc.pipe(res);
   doc.end();
 };
+
+// DELETE /api/admin/transactions/:id
+exports.deleteTransaction = async (req, res) => {
+  const { id } = req.params;
+
+  const [trx] = await pool.query(
+    "SELECT * FROM transaksi WHERE id_transaksi=?",
+    [id]
+  );
+  if (!trx.length) return bad(res, "Transaksi tidak ditemukan", 404);
+
+  // hanya boleh hapus yang cancelled
+  if (trx[0].status !== "cancelled") {
+    return bad(res, "Hanya transaksi dengan status 'cancelled' yang bisa dihapus");
+  }
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    // hapus detail transaksi dulu (foreign key)
+    await conn.query(
+      "DELETE FROM detail_transaksi WHERE id_transaksi=?",
+      [id]
+    );
+
+    // hapus transaksi
+    await conn.query(
+      "DELETE FROM transaksi WHERE id_transaksi=?",
+      [id]
+    );
+
+    // hapus notifikasi terkait (opsional)
+    // await conn.query("DELETE FROM notifikasi WHERE pesan LIKE ?", [`%#${id}%`]);
+
+    await conn.commit();
+
+    return ok(res, null, "Transaksi berhasil dihapus dari sistem");
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
+};

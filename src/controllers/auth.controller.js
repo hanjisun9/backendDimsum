@@ -26,7 +26,7 @@ exports.register = async (req, res) => {
   );
 
   const [rows] = await pool.query(
-    "SELECT id_user, nama, email, role, gambar_profile FROM users WHERE id_user=?",
+    "SELECT id_user, nama, email, no_hp, alamat, role, gambar_profile FROM users WHERE id_user=?",
     [result.insertId]
   );
 
@@ -59,11 +59,15 @@ exports.login = async (req, res) => {
 };
 
 exports.me = async (req, res) => {
-  return ok(res, req.user, "Profile");
+  const [rows] = await pool.query(
+    "SELECT id_user, nama, email, no_hp, alamat, role, gambar_profile FROM users WHERE id_user=?",
+    [req.user.id_user]
+  );
+  return ok(res, rows[0], "Profile");
 };
 
 exports.updateMe = async (req, res) => {
-  const { nama, email, password, gambar_profile } = req.body;
+  const { nama, email, password, gambar_profile, no_hp, alamat } = req.body;
 
   // Admin: hanya boleh update password (sesuai requirement)
   if (req.user.role === "admin") {
@@ -73,7 +77,7 @@ exports.updateMe = async (req, res) => {
     return ok(res, null, "Password admin berhasil diubah");
   }
 
-  // User: boleh ubah nama/email/password/gambar_profile
+  // User: boleh ubah nama/email/password/gambar_profile/no_hp/alamat
   if (email) {
     const [exists] = await pool.query(
       "SELECT id_user FROM users WHERE email=? AND id_user<>?",
@@ -90,13 +94,23 @@ exports.updateMe = async (req, res) => {
       nama = COALESCE(?, nama),
       email = COALESCE(?, email),
       password = COALESCE(?, password),
-      gambar_profile = COALESCE(?, gambar_profile)
+      gambar_profile = COALESCE(?, gambar_profile),
+      no_hp = COALESCE(?, no_hp),
+      alamat = COALESCE(?, alamat)
      WHERE id_user=?`,
-    [nama || null, email || null, hashed || null, gambar_profile || null, req.user.id_user]
+    [
+      nama || null,
+      email || null,
+      hashed || null,
+      gambar_profile || null,
+      no_hp || null,
+      alamat || null,
+      req.user.id_user
+    ]
   );
 
   const [rows] = await pool.query(
-    "SELECT id_user, nama, email, role, gambar_profile FROM users WHERE id_user=?",
+    "SELECT id_user, nama, email, no_hp, alamat, role, gambar_profile FROM users WHERE id_user=?",
     [req.user.id_user]
   );
 

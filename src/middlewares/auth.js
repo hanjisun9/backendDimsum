@@ -12,7 +12,7 @@ module.exports = async function auth(req, res, next) {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
     const [rows] = await pool.query(
-      "SELECT id_user, nama, email, role, gambar_profile FROM users WHERE id_user=?",
+      "SELECT id_user, nama, email, no_hp, alamat, role, gambar_profile FROM users WHERE id_user=?",
       [decoded.id_user]
     );
     if (!rows.length) {
