@@ -4,6 +4,12 @@
 - Authentication
   Semua endpoint protected menggunakan JWT (JSON Web Token). Yang dimana wajib menggunakan header berikut:
   Authorization : Bearer <token>
+- Login Admin menggunakan
+  ``` bash
+  {
+    "email": "dimsumadmin@gmail.com",
+    "password": "dimcumenak"
+  }
 
 ---
 
