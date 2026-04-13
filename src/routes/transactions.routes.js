@@ -8,7 +8,6 @@ router.use(auth, role(["user"]));
 router.get("/", c.myTransactions);
 router.get("/:id", c.myTransactionDetail);
 
-// user batalkan pesanan
 router.put("/:id/cancel", c.cancelTransaction);
 
 module.exports = router;

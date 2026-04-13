@@ -1,6 +1,7 @@
 const pool = require("../config/db");
 const { ok, bad } = require("../utils/response");
 const { notifyAdmin } = require("../services/notif.service");
+const { buildReceiptPDF } = require("../services/receipt.service");
 
 exports.myTransactions = async (req, res) => {
   const [rows] = await pool.query(
@@ -30,18 +31,45 @@ exports.myTransactionDetail = async (req, res) => {
   return ok(res, { transaksi: trx[0], items }, "Detail transaksi");
 };
 
-// PUT /api/transactions/:id/cancel
-exports.cancelTransaction = async (req, res) => {
+exports.receipt = async (req, res) => {
   const { id } = req.params;
 
-  // cek transaksi milik user ini
+  const [trx] = await pool.query(
+    `SELECT t.*, u.nama, u.email
+     FROM transaksi t
+     JOIN users u ON u.id_user = t.id_user
+     WHERE t.id_transaksi=? AND t.id_user=?`,
+    [id, req.user.id_user]
+  );
+
+  if (!trx.length) return bad(res, "Transaksi tidak ditemukan", 404);
+  if (!["paid", "dikirim", "selesai"].includes(trx[0].status)) {
+    return bad(res, "Struk hanya bisa dicetak setelah pembayaran berhasil / pesanan diproses");
+  }
+
+  const [items] = await pool.query(
+    `SELECT dt.*, p.nama_produk, p.harga
+     FROM detail_transaksi dt
+     JOIN produk p ON p.id_produk = dt.id_produk
+     WHERE dt.id_transaksi=?`,
+    [id]
+  );
+
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `inline; filename="struk-${id}.pdf"`);
+
+  const doc = buildReceiptPDF(trx[0], items);
+  doc.pipe(res);
+  doc.end();
+};
+
+exports.cancelTransaction = async (req, res) => {
+  const { id } = req.params;
   const [trx] = await pool.query(
     "SELECT * FROM transaksi WHERE id_transaksi=? AND id_user=?",
     [id, req.user.id_user]
   );
   if (!trx.length) return bad(res, "Transaksi tidak ditemukan", 404);
-
-  // hanya bisa cancel kalau masih pending
   if (trx[0].status !== "pending") {
     return bad(res, "Hanya transaksi dengan status 'pending' yang bisa dibatalkan");
   }
@@ -49,14 +77,11 @@ exports.cancelTransaction = async (req, res) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
-
-    // ubah status jadi cancelled
     await conn.query(
       "UPDATE transaksi SET status='cancelled' WHERE id_transaksi=?",
       [id]
     );
-
-    // kembalikan stok produk
+  
     const [items] = await conn.query(
       "SELECT id_produk, jumlah FROM detail_transaksi WHERE id_transaksi=?",
       [id]
@@ -71,7 +96,6 @@ exports.cancelTransaction = async (req, res) => {
 
     await conn.commit();
 
-    // notif admin: pesanan dibatalkan user
     await notifyAdmin(
       "error",
       "Gagal",

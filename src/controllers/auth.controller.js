@@ -68,16 +68,16 @@ exports.me = async (req, res) => {
 
 exports.updateMe = async (req, res) => {
   const { nama, email, password, gambar_profile, no_hp, alamat } = req.body;
-
-  // Admin: hanya boleh update password (sesuai requirement)
   if (req.user.role === "admin") {
-    if (!password) return bad(res, "Admin hanya boleh mengubah password (field password wajib)");
+    if (!password)
+      return bad(res, "Admin hanya boleh mengubah password (field password wajib)");
     const hashed = await bcrypt.hash(password, 10);
-    await pool.query("UPDATE users SET password=? WHERE id_user=?", [hashed, req.user.id_user]);
+    await pool.query("UPDATE users SET password=? WHERE id_user=?", [
+      hashed,
+      req.user.id_user,
+    ]);
     return ok(res, null, "Password admin berhasil diubah");
   }
-
-  // User: boleh ubah nama/email/password/gambar_profile/no_hp/alamat
   if (email) {
     const [exists] = await pool.query(
       "SELECT id_user FROM users WHERE email=? AND id_user<>?",
@@ -88,6 +88,13 @@ exports.updateMe = async (req, res) => {
 
   let hashed = null;
   if (password) hashed = await bcrypt.hash(password, 10);
+
+  let gambarProfileValue = null;
+  if (req.file) {
+    gambarProfileValue = `/uploads/profiles/${req.file.filename}`;
+  } else if (gambar_profile) {
+    gambarProfileValue = gambar_profile;
+  }
 
   await pool.query(
     `UPDATE users SET
@@ -102,10 +109,10 @@ exports.updateMe = async (req, res) => {
       nama || null,
       email || null,
       hashed || null,
-      gambar_profile || null,
+      gambarProfileValue || null,
       no_hp || null,
       alamat || null,
-      req.user.id_user
+      req.user.id_user,
     ]
   );
 

@@ -8,7 +8,6 @@ exports.create = async (req, res) => {
     return bad(res, "nama_produk, harga, stok wajib");
   }
 
-  // kalau ada file, simpan path-nya ke DB
   let gambarPath = null;
   if (req.file) {
     gambarPath = `/uploads/products/${req.file.filename}`;
@@ -44,16 +43,14 @@ exports.update = async (req, res) => {
   const updates = [];
   const values = [];
 
-  // ambil dari body
   for (const f of fields) {
-    if (f === "gambar_produk") continue; // di-handle di bawah
+    if (f === "gambar_produk") continue; 
     if (req.body[f] !== undefined) {
       updates.push(`${f}=?`);
       values.push(req.body[f]);
     }
   }
 
-  // kalau ada file baru, update gambar_produk juga
   if (req.file) {
     const gambarPath = `/uploads/products/${req.file.filename}`;
     updates.push("gambar_produk=?");

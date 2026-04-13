@@ -50,7 +50,6 @@ exports.updateStatus = async (req, res) => {
 
   await pool.query("UPDATE transaksi SET status=? WHERE id_transaksi=?", [status, id]);
 
-  // notif untuk user + admin (sesuai kebutuhan kamu)
   if (status === "paid") {
     await notifyUser(trx.id_user, "success", "Berhasil", "Pembayaran berhasil. Pesanan Anda akan segera diproses.");
     await notifyAdmin("success", "Berhasil", `Pembayaran berhasil diterima untuk transaksi #${id}.`);
@@ -96,7 +95,6 @@ exports.receipt = async (req, res) => {
   doc.end();
 };
 
-// DELETE /api/admin/transactions/:id
 exports.deleteTransaction = async (req, res) => {
   const { id } = req.params;
 
@@ -106,7 +104,6 @@ exports.deleteTransaction = async (req, res) => {
   );
   if (!trx.length) return bad(res, "Transaksi tidak ditemukan", 404);
 
-  // hanya boleh hapus yang cancelled
   if (trx[0].status !== "cancelled") {
     return bad(res, "Hanya transaksi dengan status 'cancelled' yang bisa dihapus");
   }
@@ -115,20 +112,15 @@ exports.deleteTransaction = async (req, res) => {
   try {
     await conn.beginTransaction();
 
-    // hapus detail transaksi dulu (foreign key)
     await conn.query(
       "DELETE FROM detail_transaksi WHERE id_transaksi=?",
       [id]
     );
 
-    // hapus transaksi
     await conn.query(
       "DELETE FROM transaksi WHERE id_transaksi=?",
       [id]
     );
-
-    // hapus notifikasi terkait (opsional)
-    // await conn.query("DELETE FROM notifikasi WHERE pesan LIKE ?", [`%#${id}%`]);
 
     await conn.commit();
 
