@@ -7,7 +7,7 @@ router.use(auth, role(["user"]));
 
 router.get("/", c.myTransactions);
 router.get("/:id", c.myTransactionDetail);
-
+router.get("/:id/receipt", c.receipt); 
 router.put("/:id/cancel", c.cancelTransaction);
 
 module.exports = router;

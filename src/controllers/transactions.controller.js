@@ -33,7 +33,6 @@ exports.myTransactionDetail = async (req, res) => {
 
 exports.receipt = async (req, res) => {
   const { id } = req.params;
-
   const [trx] = await pool.query(
     `SELECT t.*, u.nama, u.email
      FROM transaksi t
@@ -41,8 +40,8 @@ exports.receipt = async (req, res) => {
      WHERE t.id_transaksi=? AND t.id_user=?`,
     [id, req.user.id_user]
   );
-
   if (!trx.length) return bad(res, "Transaksi tidak ditemukan", 404);
+
   if (!["paid", "dikirim", "selesai"].includes(trx[0].status)) {
     return bad(res, "Struk hanya bisa dicetak setelah pembayaran berhasil / pesanan diproses");
   }
@@ -70,6 +69,7 @@ exports.cancelTransaction = async (req, res) => {
     [id, req.user.id_user]
   );
   if (!trx.length) return bad(res, "Transaksi tidak ditemukan", 404);
+
   if (trx[0].status !== "pending") {
     return bad(res, "Hanya transaksi dengan status 'pending' yang bisa dibatalkan");
   }
@@ -81,7 +81,7 @@ exports.cancelTransaction = async (req, res) => {
       "UPDATE transaksi SET status='cancelled' WHERE id_transaksi=?",
       [id]
     );
-  
+
     const [items] = await conn.query(
       "SELECT id_produk, jumlah FROM detail_transaksi WHERE id_transaksi=?",
       [id]
@@ -95,7 +95,6 @@ exports.cancelTransaction = async (req, res) => {
     }
 
     await conn.commit();
-
     await notifyAdmin(
       "error",
       "Gagal",
