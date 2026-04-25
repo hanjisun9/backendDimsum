@@ -4,6 +4,7 @@ const { notifyAdmin } = require("../services/notif.service");
 const ALLOWED_VARIAN = ["hexagon", "custom"];
 const ALLOWED_LAYANAN = ["Desain Packaging", "Cetak Desain"];
 
+// GET /api/cart
 exports.getCart = async (req, res) => {
   const [rows] = await pool.query(
     `SELECT 
@@ -21,10 +22,14 @@ exports.getCart = async (req, res) => {
   return ok(res, rows, "Keranjang");
 };
 
+// POST /api/cart/add
+// Body: { id_produk, jumlah, varian, layanan, metode_pembayaran }
 exports.addToCart = async (req, res) => {
   const { id_produk, jumlah, varian, layanan, metode_pembayaran } = req.body;
 
   if (!id_produk || !jumlah) return bad(res, "id_produk & jumlah wajib");
+
+  // validasi varian & layanan agar cocok dengan ENUM di DB
   if (!varian || !ALLOWED_VARIAN.includes(varian)) {
     return bad(res, "varian tidak valid (harus salah satu: " + ALLOWED_VARIAN.join(", ") + ")");
   }
@@ -46,6 +51,7 @@ exports.addToCart = async (req, res) => {
 
   const harga = prod[0].harga;
 
+  // Anggap item "sama" jika id_produk + varian + layanan + metode_pembayaran sama
   const [exists] = await pool.query(
     `SELECT id_keranjang, jumlah
      FROM keranjang
@@ -82,6 +88,7 @@ exports.addToCart = async (req, res) => {
   return created(res, null, "Produk masuk keranjang");
 };
 
+// PUT /api/cart/item/:id
 exports.updateItem = async (req, res) => {
   const { id } = req.params;
   const { jumlah } = req.body;
@@ -110,6 +117,7 @@ exports.updateItem = async (req, res) => {
   return ok(res, null, "Item keranjang diperbarui");
 };
 
+// DELETE /api/cart/item/:id
 exports.removeItem = async (req, res) => {
   const { id } = req.params;
   await pool.query(
@@ -119,6 +127,9 @@ exports.removeItem = async (req, res) => {
   return ok(res, null, "Item keranjang dihapus");
 };
 
+// POST /api/cart/checkout
+// Body: { email_penerima, alamat, metode_pembayaran? }
+// metode_pembayaran boleh dikirim dari checkout, atau ambil dari item keranjang (kalau semua sama)
 exports.checkout = async (req, res) => {
   let { email_penerima, alamat, metode_pembayaran } = req.body;
 
@@ -139,6 +150,8 @@ exports.checkout = async (req, res) => {
     );
 
     if (!cart.length) throw Object.assign(new Error("Keranjang kosong"), { status: 400 });
+
+    // jika metode_pembayaran tidak dikirim saat checkout, coba ambil dari cart
     if (!metode_pembayaran) {
       const methods = [...new Set(cart.map(i => i.metode_pembayaran).filter(Boolean))];
       if (methods.length === 1) metode_pembayaran = methods[0];
@@ -152,11 +165,13 @@ exports.checkout = async (req, res) => {
       throw Object.assign(new Error("metode_pembayaran tidak valid"), { status: 400 });
     }
 
+    // validasi: kalau cart item punya metode berbeda-beda, tolak (karena transaksi hanya 1 metode)
     const uniq = [...new Set(cart.map(i => i.metode_pembayaran).filter(Boolean))];
     if (uniq.length > 1) {
       throw Object.assign(new Error("Metode pembayaran di keranjang harus sama untuk checkout"), { status: 400 });
     }
 
+    // cek stok
     for (const item of cart) {
       if (item.stok < item.jumlah) {
         throw Object.assign(new Error(`Stok tidak cukup untuk produk id ${item.id_produk}`), { status: 400 });
@@ -175,6 +190,7 @@ exports.checkout = async (req, res) => {
     for (const item of cart) {
       const subtotal = item.harga * item.jumlah;
 
+      // kalau kamu sudah ALTER TABLE detail_transaksi tambah varian+layanan:
       await conn.query(
         `INSERT INTO detail_transaksi (id_transaksi, id_produk, jumlah, subtotal, varian, layanan)
          VALUES (?,?,?,?,?,?)`,

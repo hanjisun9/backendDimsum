@@ -3,6 +3,7 @@ const pool = require("../config/db");
 const { notifyAdmin, notifyUser } = require("../services/notif.service");
 
 async function autoCancel() {
+  // cancel transaksi pending yang lebih dari 24 jam
   const [rows] = await pool.query(
     `SELECT * FROM transaksi
      WHERE status='pending'
@@ -28,6 +29,7 @@ async function autoCancel() {
 }
 
 function startAutoCancelJob() {
+  // setiap 1 menit cek
   cron.schedule("* * * * *", async () => {
     try {
       await autoCancel();

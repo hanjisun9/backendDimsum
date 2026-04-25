@@ -10,4 +10,6 @@ router.use("/notifications", require("./notifications.routes"));
 router.use("/admin/products", require("./admin.products.routes"));
 router.use("/admin/transactions", require("./admin.transactions.routes"));
 
+router.use("/payments", require("./payments.routes"));
+
 module.exports = router;

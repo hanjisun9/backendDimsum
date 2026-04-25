@@ -5,6 +5,8 @@ const c = require("../controllers/admin.products.controller");
 const { uploadProductImage } = require("../middlewares/uploadProduct");
 
 router.use(auth, role(["admin"]));
+
+// field name "gambar" harus sama dengan yang dikirim frontend
 router.post("/", uploadProductImage.single("gambar"), c.create);
 router.put("/:id", uploadProductImage.single("gambar"), c.update);
 

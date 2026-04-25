@@ -10,6 +10,8 @@ router.get("/me", auth, c.me);
 router.put(
   "/me",
   auth,
-  uploadProfileImage.single("gambar_profile"), 
+  uploadProfileImage.single("gambar_profile"), // nama field file = "gambar_profile"
   c.updateMe
 );
+
+module.exports = router;

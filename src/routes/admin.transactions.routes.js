@@ -3,6 +3,7 @@ const auth = require("../middlewares/auth");
 const role = require("../middlewares/role");
 const c = require("../controllers/admin.transactions.controller");
 
+// semua route di bawah ini hanya untuk admin
 router.use(auth, role(["admin"]));
 
 router.get("/", c.allTransactions);
